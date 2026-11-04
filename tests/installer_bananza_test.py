@@ -24,7 +24,7 @@ class InstallerTest(unittest.TestCase):
     def setUp(self):
         self.work = tempfile.TemporaryDirectory()
         self.addCleanup(self.work.cleanup)
-        base = Path(self.work.name)
+        base = Path(self.work.name).resolve()
         self.root, self.exefs, self.romfs = base / 'source', base / 'dump exefs', base / 'dump romfs'
         self.dest, self.temp = base / 'installed [game]', base / 'temporary'
         self.calls = []
@@ -476,3 +476,4 @@ a=sys.argv; out=pathlib.Path(a[a.index('--out')+1]); out.mkdir(parents=True)
 
 if __name__ == '__main__':
     unittest.main()
+
