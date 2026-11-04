@@ -1,0 +1,74 @@
+name: dkb-windows
+on:
+  push:
+    branches: ['dkb-windows-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-libvpx mingw-w64-ucrt-x86_64-zstd
+            mingw-w64-ucrt-x86_64-vulkan-devel mingw-w64-ucrt-x86_64-vulkan-memory-allocator
+            mingw-w64-ucrt-x86_64-vulkan-validation-layers mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-spirv-tools
+      - name: Locate UCRT64
+        shell: msys2 {0}
+        run: echo "DKB_UCRT_ROOT=$(cygpath -w /ucrt64)" >> "$GITHUB_ENV"
+      - name: Build translator and assemble portable tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cd src
+          python -m pip install -r tools/requirements.txt
+          if ($LASTEXITCODE) { throw 'pip failed' }
+          python tools/build_xlate.py
+          if ($LASTEXITCODE) { throw 'Translator build failed' }
+          $bundle = Join-Path $env:GITHUB_WORKSPACE 'bundle'
+          New-Item -ItemType Directory -Force "$bundle/src", "$bundle/bin" | Out-Null
+          git archive HEAD -o "$env:RUNNER_TEMP/source.zip"
+          if ($LASTEXITCODE) { throw 'Source archive failed' }
+          Expand-Archive "$env:RUNNER_TEMP/source.zip" "$bundle/src"
+          Copy-Item build/xlate/totk_xlate.exe, build/xlate/totk_xlate.id "$bundle/bin"
+          Copy-Item $env:pythonLocation "$bundle/python" -Recurse
+          $ucrt = $env:DKB_UCRT_ROOT
+          if (-not (Test-Path "$ucrt/bin/clang.exe")) { throw 'UCRT64 missing' }
+          Copy-Item $ucrt "$bundle/ucrt64" -Recurse
+          $release = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest'
+          $asset = $release.assets | Where-Object { $_.name -match '^MinGit-[0-9.]+-64-bit\.zip$' } | Select-Object -First 1
+          if (-not $asset) { throw 'MinGit asset missing' }
+          Invoke-WebRequest $asset.browser_download_url -OutFile "$env:RUNNER_TEMP/mingit.zip"
+          Expand-Archive "$env:RUNNER_TEMP/mingit.zip" "$bundle/git"
+          Copy-Item .github/workflows/INSTALAR-DK.cmd "$bundle/INSTALAR-DK.cmd"
+          & "$bundle/python/python.exe" -c 'import tkinter,numpy,lz4,cryptography; t=tkinter.Tcl(); print(t.eval("info patchlevel"))'
+          if ($LASTEXITCODE) { throw 'Portable Python check failed' }
+          & "$bundle/ucrt64/bin/clang.exe" --version
+          if ($LASTEXITCODE) { throw 'Portable Clang check failed' }
+          python tests/installer_bananza_test.py
+          if ($LASTEXITCODE) { throw 'Installer tests failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DKB-Windows-Tools
+          path: bundle/
+          retention-days: 7
+          if-no-files-found: error
