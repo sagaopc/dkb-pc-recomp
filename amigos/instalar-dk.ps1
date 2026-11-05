@@ -37,8 +37,11 @@ Write-Host 'Nao compartilhe o dkb.exe, o cache de shaders, os saves nem o dump.'
 
 Titulo '1/7 Verificando o PC'
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { Parar 'precisa de Windows x64.' }
-$ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-if ($ram -lt 15) { Parar "precisa de 16 GB de RAM; este PC tem $ram GB." }
+# Windows reports less than what is installed (a 16 GB PC can show 14 GB), so the requirement goes by the modules. Some VMs list none.
+$visivel = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+$ram = [math]::Max([math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB), $visivel)
+if ($ram -lt 16) { Parar "precisa de 16 GB de RAM; este PC tem $ram GB." }
+if ($visivel -lt 15) { Write-Host "AVISO: o Windows so pode usar $visivel GB dos $ram GB, e o jogo usa cerca de 13 GB. Feche os outros programas antes de jogar; pode travar." -ForegroundColor Yellow }
 $unidade = (Split-Path $pasta -Qualifier).TrimEnd(':')
 $livre = [math]::Floor((Get-PSDrive $unidade).Free / 1GB)
 $feito = Test-Path (Join-Path $pasta 'build\extracted\dkb100\romfs')
